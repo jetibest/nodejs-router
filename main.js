@@ -1,6 +1,7 @@
 const fs = require('fs');
 const http = require('http');
 const https = require('https');
+const url = require('url');
 const connect = require('connect');
 const vhost = require('vhost');
 const proxy = require('http-proxy-middleware');
@@ -43,6 +44,8 @@ Object.keys(routers).forEach(function(port)
 		if(typeof router.ssl === 'object')
 		{
 			ssl = router.ssl;
+			ssl.key = fs.readFileSync(ssl.key);
+			ssl.cert = fs.readFileSync(ssl.cert);
 		}
 		else
 		{
@@ -77,8 +80,9 @@ Object.keys(routers).forEach(function(port)
 			routes.push({path: '/', redirect: v.redirect});
 		}
 		
-		(v.routes || []).forEach(function(subroute)
+		routes.forEach(function(subroute)
 		{
+			const subroutePath = subroute.path || '/';
 			if(subroute.redirect)
 			{
 				const targetURL = typeof v.redirect === 'object' ? v.redirect : url.parse(v.redirect);
@@ -87,8 +91,8 @@ Object.keys(routers).forEach(function(port)
 				targetURL.port = (':' + (targetURL.port || '')).replace(/^:$/gi, '');
 				targetURL.path = targetURL.path || '';
 				targetURL.basePath = targetURL.basePath || '';
-				console.log(':' + listenPort + ' Redirecting virtual host: ' + host + '' + subroute.path + ' to ' + targetURL.protocol + '' + targetURL.hostname + targetURL.port + targetURL.basePath + targetURL.path);
-				p.use(subroute.path, function(req, res, next)
+				console.log(':' + listenPort + ' Redirecting virtual host: ' + host + '' + subroutePath + ' to ' + targetURL.protocol + '' + targetURL.hostname + targetURL.port + targetURL.basePath + targetURL.path);
+				p.use(subroutePath, function(req, res, next)
 				{
 					if(req.secure)
 					{
@@ -101,7 +105,7 @@ Object.keys(routers).forEach(function(port)
 			else
 			{
 				console.log(':' + listenPort + ' Routing virtual host: ' + host + '' + subroute.path + ' -> ' + subroute.address);
-				p.use(proxy(subroute.path, {
+				p.use(proxy(subroutePath, {
 					target: subroute.address,
 					pathRewrite: function(path, req)
 					{
@@ -117,7 +121,14 @@ Object.keys(routers).forEach(function(port)
 			}
 		});
 		
-		app.use(vhost(host, p));
+		if(host === '*')
+		{
+			app.use(p);
+		}
+		else
+		{
+			app.use(vhost(host, p));
+		}
 	});
 	
 	// Final virtual host catch-all:
