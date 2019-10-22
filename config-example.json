@@ -1,0 +1,22 @@
+{
+	"ssl": {
+		"key": "ssl/private/key.pem",
+		"cert": "ssl/certs/cert.pem"
+	},
+	"routes": [
+		{
+			"host": {"type": "RegExp", "pattern": "^(www\\.|)another\\.example\\.com$", "flags": "gi"},
+			"routes": [
+				{"path": "/some-webapp", "address": "http://localhost:8083"},
+				{"path": "/some-other-webapp", "address": "http://localhost:8084"},
+				{"path": "/", "address": "http://localhost:8082"}
+			]
+		},
+		{
+			"host": "*.example.com",
+			"routes": [
+				{"path": "/", "address": "http://localhost:8081"}
+			]
+		}
+	]
+}
