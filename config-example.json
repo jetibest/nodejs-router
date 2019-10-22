@@ -1,22 +1,24 @@
 {
-	"ssl": {
-		"key": "ssl/private/key.pem",
-		"cert": "ssl/certs/cert.pem"
-	},
-	"routes": [
-		{
-			"host": {"type": "RegExp", "pattern": "^(www\\.|)another\\.example\\.com$", "flags": "gi"},
-			"routes": [
-				{"path": "/some-webapp", "address": "http://localhost:8083"},
-				{"path": "/some-other-webapp", "address": "http://localhost:8084"},
-				{"path": "/", "address": "http://localhost:8082"}
+	"routers": {
+		"8080": {
+			"ssl": {
+				"key": "ssl/private/key.pem",
+				"cert": "ssl/certs/cert.pem"
+			},
+			"vhosts": [
+				{
+					"host": "*.some-domain.com",
+					"address": "http://localhost:8084"
+				},
+				{
+					"host": {"type": "RegExp", "pattern": "^(www\\.|)my-domain\\.com$", "flags": "gi"},
+					"routes": [
+						{"path": "/some-webapp", "address": "http://localhost:8082"},
+						{"path": "/some-other-webapp", "address": "http://localhost:8083"}
+					]
+				}
 			]
 		},
-		{
-			"host": "*.example.com",
-			"routes": [
-				{"path": "/", "address": "http://localhost:8081"}
-			]
-		}
-	]
+		"80": {"vhosts": [{"redirect": "https://"}]}
+	}
 }
