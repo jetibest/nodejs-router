@@ -6,7 +6,7 @@ Simple NodeJS router for local HTTP/HTTPS webapplications
 cd /srv && git clone https://github.com/jetibest/nodejs-router.git
 ```
 
-/root/nodejs-router.service:
+**`/root/nodejs-router.service`**:
 ```
 [Unit]
 Description=HTTP/HTTPS router using NodeJS
