@@ -104,18 +104,19 @@ Object.keys(routers).forEach(function(port)
 			}
 			else
 			{
-				console.log(':' + listenPort + ' Routing virtual host: ' + host + '' + subroute.path + ' -> ' + subroute.address);
+				console.log(':' + listenPort + ' Routing virtual host: ' + host + '' + subroutePath + ' -> ' + subroute.address);
 				p.use(proxy(subroutePath, {
 					target: subroute.address,
 					pathRewrite: function(path, req)
 					{
-						return path.substring(subroute.path.length);
+						return path.substring(subroutePath.length);
 					},
 					onProxyReq: function(proxyReq, req, res, options)
 					{
 						// problem: http://localhost:8082 gets parsed by the proxy (using require('url').parse) with trailing slash
 						// solved by letting proxy send the original path in a header
 						proxyReq.setHeader('X-Forwarded-Original-Path', req.originalUrl);
+						proxyReq.setHeader('X-Forwarded-Original-Proto', req.headers['x-forwarded-proto'] || req.protocol || '');
 					}
 				}));
 			}
