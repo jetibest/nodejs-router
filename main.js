@@ -2,9 +2,9 @@ const fs = require('fs');
 const http = require('http');
 const https = require('https');
 const url = require('url');
-const connect = require('connect');
-const vhost = require('vhost');
-const proxy = require('http-proxy-middleware');
+const connect = require('connect'); // npm install connect
+const vhost = require('vhost'); // npm install vhost
+const proxy = require('http-proxy-middleware').createProxyMiddleware; // npm install proxy
 
 const config = JSON.parse(fs.readFileSync('config.json'));
 
