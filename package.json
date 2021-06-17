@@ -1,0 +1,10 @@
+{
+	"name": "router",
+	"version": "1.0.0",
+	"dependencies": {
+		"connect": "latest",
+		"vhost": "latest",
+		"proxy": "latest",
+		"http-proxy-middleware": "latest"
+	}
+}
