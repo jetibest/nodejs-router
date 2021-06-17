@@ -14,7 +14,7 @@ Description=HTTP/HTTPS router using NodeJS
 [Service]
 Type=simple
 WorkingDirectory=/srv/nodejs-router
-ExecStart=/bin/bash -c 'cd /srv/nodejs-router/ && node main.js'
+ExecStart=/bin/bash -c 'cd /srv/nodejs-router/ && node main.js -c config.json localhost:80'
 Restart=always
 RestartSec=5
 
@@ -28,6 +28,6 @@ systemctl start nodejs-router
 ```
 
 # TODO
- - Implement SNICallback for different certificates per vhost on the same port
  - Implement `--check-syntax` to ensure syntax will work
+ - Implement regex backreference to include regex group in resulting address or redirect value
  - Update Readme with documentation for `config.json`
