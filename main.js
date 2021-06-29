@@ -106,8 +106,6 @@ const filecache = (function()
 	};
 })();
 
-console.log('info: Running router-server on ' + listen_host + ':' + listen_port + ' ' + (config.tls || config.ssl ? 'with SSL' : 'without SSL'));
-
 // main app
 const app = connect();
 
@@ -331,10 +329,15 @@ if(config.tls || config.ssl)
 		cert: tls_default.cert
 	};
 	
+	console.log('info: Starting HTTPS server on ' + listen_host + ':' + listen_port + ' with TLS/SSL certificate support (using SNI for per host/domain configured certificates).');
+
+	
 	https.createServer(options, app).listen(listen_port, listen_host);
 }
 else
 {
+	console.log('info: Starting HTTP server on ' + listen_host + ':' + listen_port + ' without TLS/SSL certificate support.');
+	
 	http.createServer(app).listen(listen_port, listen_host);
 }
 
