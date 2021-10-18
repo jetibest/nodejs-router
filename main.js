@@ -1,3 +1,5 @@
+require('events').defaultMaxListeners = 1024; // support plenty of listeners, this is maximum number of hosts that we can support through our vhosts/proxy-config
+
 const fs = require('fs');
 const http = require('http');
 const https = require('https');
@@ -175,16 +177,25 @@ config.vhosts.forEach(function(v)
 			console.log('info: ' + listen_host + ':' + listen_port + ' will reroute: ' + host + '' + subroutePath + ' -> ' + subroute.address);
 			
 			p.use(proxy(subroutePath, {
+				ws: true,
 				target: subroute.address,
 				pathRewrite: function(path, req)
 				{
+					// fix: ensure req.originalUrl can be used in onProxyReqWs
+					if(typeof req.originalUrl === 'undefined') req.originalUrl = req.url;
+					
 					return path.substring(subroutePath.length);
 				},
 				onProxyReq: function(proxyReq, req, res, options)
 				{
 					// problem: http://localhost:8082 gets parsed by the proxy (using require('url').parse) with trailing slash
 					// solved by letting proxy send the original path in a header
-					proxyReq.setHeader('X-Forwarded-Original-Path', req.originalUrl);
+					proxyReq.setHeader('X-Forwarded-Original-Path', req.originalUrl || req.url);
+					proxyReq.setHeader('X-Forwarded-Original-Proto', req.headers['x-forwarded-proto'] || req.protocol || '');
+				},
+				onProxyReqWs: function(proxyReq, req, socket, options, head)
+				{
+					proxyReq.setHeader('X-Forwarded-Original-Path', req.originalUrl || req.url);
 					proxyReq.setHeader('X-Forwarded-Original-Proto', req.headers['x-forwarded-proto'] || req.protocol || '');
 				}
 			}));
