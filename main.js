@@ -181,6 +181,8 @@ config.vhosts.forEach(function(v)
 				target: subroute.address,
 				pathRewrite: function(path, req)
 				{
+					// console.log('proxy.pathRewrite (subRoute = ' + subroutePath + '): ' + path + ' for ' + req.url + ' (' + req.originalUrl + ')');
+					
 					// fix: ensure req.originalUrl can be used in onProxyReqWs
 					if(typeof req.originalUrl === 'undefined') req.originalUrl = req.url;
 					
@@ -188,6 +190,8 @@ config.vhosts.forEach(function(v)
 				},
 				onProxyReq: function(proxyReq, req, res, options)
 				{
+					// console.log('proxy.onProxyReq (subRoute = ' + subroutePath + '): ' + proxyReq.protocol + ':' + proxyReq.url + ' --> ' + req.protocol + ':' + req.url + ' (' + req.originalUrl + ')');
+					
 					// problem: http://localhost:8082 gets parsed by the proxy (using require('url').parse) with trailing slash
 					// solved by letting proxy send the original path in a header
 					proxyReq.setHeader('X-Forwarded-Original-Path', req.originalUrl || req.url);
@@ -195,9 +199,15 @@ config.vhosts.forEach(function(v)
 				},
 				onProxyReqWs: function(proxyReq, req, socket, options, head)
 				{
+					// console.log('proxy.onProxyReqWs (subRoute = ' + subroutePath + '): ' + proxyReq.protocol + ':' + proxyReq.url + ' --> ' + req.protocol + ':' + req.url + ' (' + req.originalUrl + ')');
+					
 					proxyReq.setHeader('X-Forwarded-Original-Path', req.originalUrl || req.url);
 					proxyReq.setHeader('X-Forwarded-Original-Proto', req.headers['x-forwarded-proto'] || req.protocol || '');
 				}
+				// see issue: https://github.com/chimurai/http-proxy-middleware/issues/818
+				// manual fix: if(!socket.preparingProxyRequest && this.shouldProxy(this.proxyOptions.pathFilter, req){ socket.preparingProxyRequest = true;
+				// when rewriting /something to /, in pathRewrite, which is contained within async await, it is possible that shouldProxy returns true for the rewritten path in another proxy instance
+				// related issue: https://github.com/nodejs/node/issues/6339
 			}));
 		}
 	});
