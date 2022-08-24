@@ -3,8 +3,8 @@
 	"version": "1.0.0",
 	"dependencies": {
 		"connect": "latest",
-		"vhost": "latest",
+		"http-proxy-middleware": "^2.0.6",
 		"proxy": "latest",
-		"http-proxy-middleware": "latest"
+		"vhost": "latest"
 	}
 }
