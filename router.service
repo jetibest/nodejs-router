@@ -1,0 +1,11 @@
+[Unit]
+Description=Locally hosted HTTP/HTTPS router at :%i (using NodeJS)
+
+[Service]
+Type=simple
+ExecStart=/srv/router/router.js :%i
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

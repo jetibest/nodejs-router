@@ -1,4 +1,3 @@
-config*.json
-!config-example.json
-nodejs-router*.service
-!nodejs-router-80-example.service
+*.crt
+*.pem
+*.key
