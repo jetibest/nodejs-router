@@ -1,0 +1,12 @@
+[Unit]
+Description=Locally hosted HTTPS router at :%i (using NodeJS)
+
+[Service]
+Type=simple
+ExecStart=/srv/router/router.js --tls --acme-challenge :%i
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+

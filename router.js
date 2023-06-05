@@ -61,8 +61,10 @@ function print_usage()
 		'  proxy: <proxy>            If false, overwrites X-Forwarded-* headers.',
 		'  acmeChallenge: {          Only used if --acme-challenge has been set.',
 		'    host: <host-match>      Only apply ACME challenge for matching hosts.',
-		'    renewInterval: 0        Number of seconds to auto-renew certificates.',
+		'          [<host-match>]    Defaults to: "*"',
+		'    renewInterval: 2419200  Number of seconds to auto-renew certificates.',
 		'                            Any falsy value (like 0) disables auto-renewal.',
+		'                            Defaults to: 2419200 (28 days).',
 		'    renewRetry: 60          Number of seconds to wait before retrying in',
 		'                            case of an error.',
 		'  }                         ',
@@ -365,26 +367,26 @@ async function parse_config(opts)
 			
 			if(!Array.isArray(obj))
 			{
-				var new_key = null;
+				var old_key = k;
 				
 				// if using underscores, convert to CamelCase
-				const keyparts = new_key.split('_');
+				const keyparts = k.split('_');
 				if(keyparts.length > 1)
 				{
-					new_key = parts.map(k => k.length > 0 ? k.charAt(0).toUpperCase() + k.slice(1) : k).join('');
+					k = keyparts.map(k => k.length > 0 ? k.charAt(0).toUpperCase() + k.slice(1) : k).join('');
 				}
 				
 				// enforce first character of the key to be lowercase
 				if(/^[A-Z]/.test(k))
 				{
-					new_key = k.charAt(0).toLowerCase() + k.slice(1);
+					k = k.charAt(0).toLowerCase() + k.slice(1);
 				}
 				
 				// apply new key
-				if(new_key !== null)
+				if(k !== old_key)
 				{
-					delete obj[k];
-					obj[new_key] = v;
+					delete obj[old_key];
+					obj[k] = v;
 				}
 			}
 			
@@ -399,7 +401,7 @@ async function parse_config(opts)
 	// ensure acmeChallenge exists
 	if(typeof config.acmeChallenge !== 'object' || config.acmeChallenge === null) config.acmeChallenge = {};
 	
-	if(!('renewInterval' in config.acmeChallenge)) config.acmeChallenge.renewInterval = 0;
+	if(!('renewInterval' in config.acmeChallenge)) config.acmeChallenge.renewInterval = 2419200;
 	
 	if(!config.acmeChallenge.renewRetry) config.acmeChallenge.renewRetry = 60;
 	
@@ -1083,7 +1085,7 @@ function create_app(config, local_server_str)
 	};
 }
 
-async function create_sni_callback(server_opts, tls, vhosts, has_acme_challenge)
+async function create_sni_callback(server_opts, tls_conf, vhosts, has_acme_challenge)
 {
 	const cache = {};
 	async function get_cached_file(filename)
@@ -1168,8 +1170,6 @@ async function create_sni_callback(server_opts, tls, vhosts, has_acme_challenge)
 		// if secureContext is falsy, grab the right TLS-certificate
 		if(!secureContext)
 		{
-			const reverse_domain = domain.split('.').reverse().join('.');
-			
 			for(var i=0;i<vhosts.length;++i)
 			{
 				const v = vhosts[i];
@@ -1182,7 +1182,7 @@ async function create_sni_callback(server_opts, tls, vhosts, has_acme_challenge)
 					
 					m.lastIndex = 0; // reset lastIndex in case g or y flags have been set
 					
-					if(m.exec(req_host))
+					if(m.exec(domain))
 					{
 						found = true;
 						break;

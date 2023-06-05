@@ -1,5 +1,5 @@
 [Unit]
-Description=Locally hosted HTTP/HTTPS router at :%i (using NodeJS)
+Description=Locally hosted HTTP router at :%i (using NodeJS)
 
 [Service]
 Type=simple
