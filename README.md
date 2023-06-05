@@ -1,52 +1,68 @@
 # nodejs-router
 Simple NodeJS router for local HTTP/HTTPS webapplications
 
-# Recommended installation
+# Recommended setup
 
 Download the code from the repository:
 ```sh
-cd /srv && git clone https://github.com/jetibest/router.git
+cd /srv && git clone https://github.com/jetibest/nodejs-router.git
 ```
 
-While JSON is supported out-of-the-box, JINI is more comfortable for humans
+While JSON is supported out-of-the-box, JINI is more comfortable for humans.
+JINI is an extension of INI, with support for nested arrays and objects.
+
 ```sh
 cd /srv/router && npm install jini
 ```
 
 ```sh
-cat <<EOF >/etc/router/80.jini
-[vhosts]
-vhost {
+cat <<EOF >/etc/router/80.ini
+vhosts[] = {
   host = *
   
-  [routes]
-  route {
-    redirect = https://
+  routes[] = {
+    redirect = https:// 
   }
 }
 EOF
 ```
 
 ```sh
-cat <<EOF >/etc/router/443.jini
-[vhosts]
-vhost {
+cat <<EOF >/etc/router/443.ini
+vhosts[] = {
   host = *
   
   [routes]
-  route {
-    address = :8080
-  }
+  (
+    {
+      path = /app1
+      address = :8081
+    }
+    {
+      path = /app2
+      address = :8082/some-dir/
+    }
+    {
+      address = :8080
+    }
+  )
 }
 EOF
 ```
 
+To use JINI, adjust the service file to pass `--config /etc/router/<port>.ini`.
+
 ```sh
-systemctl enable /srv/router@80.service
+systemctl link /srv/router/router@.service
+systemctl link /srv/router/router-tls@.service
+
+systemctl enable router@80
 systemctl start router@80
-systemctl enable /srv/router@443.service
-systemctl start router@443
+systemctl enable router-tls@443
+systemctl start router-tls@443
 ```
+
+# Manual
 
 ```
 Usage: /usr/bin/node /srv/router/router.js [OPTIONS] [[bind-host:]listen-port]
@@ -84,8 +100,10 @@ CONFIG
   proxy: <proxy>            If false, overwrites X-Forwarded-* headers.
   acmeChallenge: {          Only used if --acme-challenge has been set.
     host: <host-match>      Only apply ACME challenge for matching hosts.
-    renewInterval: 0        Number of seconds to auto-renew certificates.
+          [<host-match>]    Defaults to: "*"
+    renewInterval: 2419200  Number of seconds to auto-renew certificates.
                             Any falsy value (like 0) disables auto-renewal.
+                            Defaults to: 2419200 (28 days).
     renewRetry: 60          Number of seconds to wait before retrying in
                             case of an error.
   }                         
@@ -268,6 +286,7 @@ EXAMPLES
     route matched, another vhost may still match that route provided that the
     vhost also matches the request host.
     Therefore, both the order of vhosts and the order of routes is important.
+
 
 
 ```
