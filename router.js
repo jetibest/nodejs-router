@@ -320,7 +320,7 @@ async function parse_args()
 	}
 	
 	// tls is enabled if not explicitly disabled and either --tls flag is provided or --tls-key/--tls-cert is specified
-	opts.tls = opts.tls !== false && !!(opts.tls || (opts.tls_key && opts.tls_cert) || opts.acme_challenge);
+	opts.tls = opts.tls !== false && !!(opts.tls || (opts.tls_key && opts.tls_cert));
 	
 	// now we set defaults for tls_key and tls_cert
 	opts.tls_key = opts.tls_key || DEFAULT_TLS_KEY_PATH;
@@ -401,7 +401,7 @@ async function parse_config(opts)
 	// ensure acmeChallenge exists
 	if(typeof config.acmeChallenge !== 'object' || config.acmeChallenge === null) config.acmeChallenge = {};
 	
-	if(!('renewInterval' in config.acmeChallenge)) config.acmeChallenge.renewInterval = 2419200;
+	if(!('renewInterval' in config.acmeChallenge)) config.acmeChallenge.renewInterval = 0;
 	
 	if(!config.acmeChallenge.renewRetry) config.acmeChallenge.renewRetry = 60;
 	
@@ -712,6 +712,7 @@ function create_app(config, local_server_str)
 		
 		// turn strings into regular expressions (note: *.example.org does not match example.org or sub.any.example.org)
 		host_matches = host_matches
+			.map(m => typeof m !== 'string' ? m : (m === '*' ? new RegExp('^.*$', 'i') : m)) // except for a single '*', which matches any domain
 			.map(m => typeof m !== 'string' ? m : m
 				.split('*')
 				.map(p => p
@@ -730,7 +731,7 @@ function create_app(config, local_server_str)
 		// possibly add {address,redirect} routes (path = source, address = destination)
 		// array may be specified, or directly address/redirect route (path is always / in this case, since it is the only route for the given host)
 		var routes = v.routes || [];
-
+		
 		// for each route
 		routes.forEach(function(subroute)
 		{
@@ -786,7 +787,8 @@ function create_app(config, local_server_str)
 			}
 			
 			// set subroute.proxy.socketPath if protocol is file
-			
+			console.log('info: CONFIG ROUTE: ', subroute);
+
 			// handle redirect
 			if(subroute.redirect)
 			{
@@ -1223,27 +1225,34 @@ async function create_sni_callback(server_opts, tls_conf, vhosts, has_acme_chall
 					if(has_acme_challenge)
 					{
 						console.error('debug: Going to create a new missing certificate for request domain (' + domain + ').');
-						
-						await acme_challenge.createCertificate({
-							// for the given domain that matched this vhost:
-							domain: domain,
-							email: v.webmasterEmailAddress || false
-						});
-						
-						console.error('debug: Dynamically loading newly created certificate for domain (' + domain + ').');
-						
-						// try again, but only for the acme_challenge certificate
-						tls_lookup[domain] = tls_read_files([acme_challenge.getCertificate(domain)]);
-						
 						try
 						{
-							tls_lookup[domain] = secureContext = await tls_lookup[domain];
+							await acme_challenge.createCertificate({
+								// for the given domain that matched this vhost:
+								domain: domain,
+								email: v.webmasterEmailAddress || false
+							});
+						
+							console.error('debug: Dynamically loading newly created certificate for domain (' + domain + ').');
 							
-							if(secureContext) return cb(null, secureContext);
+							// try again, but only for the acme_challenge certificate
+							tls_lookup[domain] = tls_read_files([acme_challenge.getCertificate(domain)]);
+							
+							try
+							{
+								tls_lookup[domain] = secureContext = await tls_lookup[domain];
+								
+								if(secureContext) return cb(null, secureContext);
+							}
+							catch(err_sub_sub)
+							{
+								console.error('debug: Failed to load newly created certificate file for request domain (' + domain + '):');
+								console.error(err_sub_sub);
+							}
 						}
 						catch(err_sub)
 						{
-							console.error('debug: Failed to load newly created certificate file for request domain (' + domain + '):');
+							console.error('debug: Failed to create new certificate for request domain (' + domain + '):');
 							console.error(err_sub);
 						}
 					}
@@ -1276,8 +1285,8 @@ async function create_sni_callback(server_opts, tls_conf, vhosts, has_acme_chall
 		var sni_callback = null;
 		var acme_challenge_port = 0;
 		
-		// create acme_challenge server virtual host, only if listen_port is explicitly defined (no default)
-		if(router_opts.tls && router_opts.acme_challenge)
+		// create acme_challenge server virtual host, only if TLS is disabled, because acme-challenge uses HTTP (without TLS!)
+		if(router_opts.acme_challenge && !router_opts.tls)
 		{
 			try
 			{
@@ -1314,7 +1323,7 @@ async function create_sni_callback(server_opts, tls_conf, vhosts, has_acme_chall
 		var renew_certificates_last_attempt = 0;
 		async function renew_certificates(manual_override)
 		{
-			if(!router_opts.tls || !router_opts.acme_challenge) return; // certificates cannot be renewed, tls is not enabled
+			if(!router_opts.acme_challenge) return; // certificates cannot be renewed, acme_challenge is not enabled
 			
 			if(renew_certificates_last_attempt === -1) return; // already working on it
 			
@@ -1401,8 +1410,8 @@ async function create_sni_callback(server_opts, tls_conf, vhosts, has_acme_chall
 			
 			// create app with virtual host and redirect rules
 			const new_app = await create_app(new_config, local_server_str);
-			
-			// setup TLS-server options
+
+			// setup TLS-server options, here router_opts.acme_challenge means that on the HTTP/:80 acme-challenge server is running and enabled
 			const new_sni_callback = router_opts.tls ? await create_sni_callback(server_opts, new_config.tls, new_config.vhosts, router_opts.acme_challenge) : null;
 			
 			// loading complete, now apply...
@@ -1490,22 +1499,22 @@ async function create_sni_callback(server_opts, tls_conf, vhosts, has_acme_chall
 		// setup SIGUSR2 that renews certificates manually per trigger
 		process.on('SIGUSR2', async () =>
 		{
-			if(router_opts.tls && router_opts.acme_challenge)
-			{
-				console.log('info: SIGUSR2 received: Renewing certificates...');
-				
-				renew_certificates(true);
-			}
-			else
+			if(router_opts.acme_challenge)
 			{
 				if(!router_opts.tls)
 				{
-					console.log('warning: SIGUSR2 received: Cannot renew certificates, tls is not enabled. Note: This option can only be enabled through Router command-line arguments, and thus cannot be dynamically changed.');
+					console.log('info: SIGUSR2 received: Renewing certificates...');
+					
+					renew_certificates(true);
 				}
-				else // if(!router_opts.acme_challenge)
+				else
 				{
-					console.log('warning: SIGUSR2 received: Cannot renew certificates, acme_challenge is not enabled. Note: This option can only be enabled through Router command-line arguments, and thus cannot be dynamically changed.');
+					console.log('warning: SIGUSR2 received: Cannot renew certificates, acme_challenge must be renewed on the HTTP (normally :80), because acme_challenge uses HTTP without TLS. This server runs HTTPS.');
 				}
+			}
+			else
+			{
+				console.log('warning: SIGUSR2 received: Cannot renew certificates, acme_challenge is not enabled. Note: This option can only be enabled through Router command-line arguments, and thus cannot be dynamically changed.');
 			}
 		});
 	}

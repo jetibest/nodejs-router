@@ -3,7 +3,7 @@ Description=Locally hosted HTTP router at :%i (using NodeJS)
 
 [Service]
 Type=simple
-ExecStart=/srv/router/router.js :%i
+ExecStart=/srv/router/router.js --acme-challenge :%i
 Restart=always
 RestartSec=5
 

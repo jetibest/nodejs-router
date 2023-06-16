@@ -43,7 +43,6 @@ async function exec_certbot(certbot_bin, certbot_args)
 
 module.exports = {
 	WEBROOT_PATH: '/tmp/acme-challenge',
-	ACME_CHALLENGE_PATH: '/.well-known/acme-challenge/',
 	CERT_FILE: '/etc/letsencrypt/live/<domain>/fullchain.pem',
 	KEY_FILE: '/etc/letsencrypt/live/<domain>/privkey.pem',
 	renewCertificates: async function(options)
@@ -122,7 +121,6 @@ module.exports = {
 		const opts_listen_port = options.listen_port || 0;
 		
 		const opts_public_html = options._public_html || this.WEBROOT_PATH;
-		const opts_listen_path = options._listen_path || this.ACME_CHALLENGE_PATH;
 		
 		const ac_jail_path = path.resolve(opts_public_html);
 		try
@@ -154,7 +152,7 @@ module.exports = {
 			});
 			ac_server.on('listening', () =>
 			{
-				log('Server listening now, waiting for acme challenge requests at ' + opts_listen_path);
+				log('Server listening now, waiting for acme challenge requests at / which maps to ' + opts_public_html + ' (which resolves to ' + ac_jail_path + ')');
 				
 				if(fulfilled) return;
 				fulfilled = true;
@@ -162,7 +160,7 @@ module.exports = {
 			});
 			ac_server.on('request', async (req, res) =>
 			{
-				const req_path = path.resolve(path.join(ac_jail_path, opts_listen_path, req.url.replace(/[?].*$/gi, '')));
+				const req_path = path.resolve(path.join(ac_jail_path, req.url.replace(/[?].*$/gi, '')));
 				
 				if(req_path.startsWith(ac_jail_path))
 				{
@@ -199,7 +197,7 @@ module.exports = {
 			});
 			ac_server.on('clientError', (err, socket) =>
 			{
-					if(err.code === 'ECONNRESET' || socket.writable) return;
+				if(err.code === 'ECONNRESET' || socket.writable) return;
 				
 				socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
 			});
