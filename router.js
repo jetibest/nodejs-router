@@ -9,7 +9,6 @@ const fs = require('fs');
 const http = require('http');
 const https = require('https');
 const tls = require('tls');
-const url = require('url');
 const path = require('path');
 const util = require('util');
 const performance = require('perf_hooks').performance;
@@ -850,7 +849,7 @@ function create_app(config, local_server_str)
 			// usage: {proxy: {auth: ...}, address: <address>}
 			// if only an address is given, proxy is implied
 			const targetAddr = subroute.address || subroute.redirect || subroute.proxy;
-			const targetURL = typeof targetAddr === 'string' ? url.parse(targetAddr) : targetAddr;
+			const targetURL = typeof targetAddr === 'string' ? new URL(targetAddr.indexOf('://') === -1 ? 'http://' + targetAddr : targetAddr) : targetAddr;
 			if(targetURL)
 			{
 				targetURL.protocol = ((targetURL.protocol || '') + ':').replace(/:.*$/, '://').replace(/^:\/\/$/, '').replace(/^ws/i, 'http');
