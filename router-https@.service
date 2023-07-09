@@ -1,9 +1,11 @@
 [Unit]
 Description=Locally hosted HTTPS router at :%i (using NodeJS)
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 ExecStart=/srv/router/router.js --tls --acme-challenge :%i
+ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
 RestartSec=5
 

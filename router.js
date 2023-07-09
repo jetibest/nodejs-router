@@ -1574,8 +1574,16 @@ async function create_sni_callback(server_opts, tls_conf, vhosts, has_acme_chall
 		server.listen(router_opts.listen_port, router_opts.listen_host);
 		
 		// reload config on SIGHUP
+		var reloading = false;
 		process.on('SIGHUP', async () =>
 		{
+			if(reloading)
+			{
+				console.log('warning: SIGHUP received: Still busy reloading configuration...');
+				return;
+			}
+			reloading = true;
+
 			console.log('info: SIGHUP received: Reloading configuration...');
 			
 			try
@@ -1587,6 +1595,8 @@ async function create_sni_callback(server_opts, tls_conf, vhosts, has_acme_chall
 				console.log('warning: Failed (' + (err ? (err.code || err.message) : 'undefined') + ') to load new configuration (did not apply):');
 				console.log(err);
 			}
+			
+			reloading = false;
 		});
 		
 		// setup SIGUSR1 that prints the current configuration
