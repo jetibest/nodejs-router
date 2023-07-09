@@ -544,6 +544,31 @@ function test_route(req, matches)
 	return false;
 }
 
+// key must be 'local' or 'remote'
+function test_address_whitelist(req, key, matches)
+{
+	var reqSocketAddress = req.socket[key + 'Address'];
+	
+	console.error('debug: Trying to match ' + key + 'Address in request: ' + reqSocketAddress);
+	
+	var found = false;
+	for(var i=0;i<matches.length;++i)
+	{
+		var m = matches[i];
+		
+		m.lastIndex = 0; // reset lastIndex in case g or y flags have been set
+		var match = m.exec(reqSocketAddress);
+		
+		if(match)
+		{
+			return true;
+		}
+	}
+	
+	return false;
+}
+
+
 function create_chain(stack)
 {
 	return function chain()
@@ -668,6 +693,103 @@ function apply_xfwd_headers(headers, trustProxy, proto, addr, port)
 		headers['x-forwarded-host'] = headers['x-forwarded-host'] || headers.host || '';
 	}
 }
+function parse_matches(matches, customRegExpFn, customWildcardSplitFn, customWildcardJoinFn, filterInputStrFn)
+{
+	if(!Array.isArray(matches))
+	{
+		matches = [matches];
+	}
+	
+	// split, flatten, trim, filter empty/null/false/undefined
+	matches = matches
+		.map(m => typeof m !== 'string' ? m : m
+			.split(/[,\r\n]/)
+		)
+		.flat()
+		.map(m =>
+		{
+			if(typeof m !== 'string')
+			{
+				return m;
+			}
+			else
+			{
+				m = m.trim();
+
+				if(typeof filterInputStrFn === 'function')
+				{
+					var m_arr = filterInputStrFn(m);
+					if(!Array.isArray(m_arr))
+					{
+						m_arr = [m_arr];
+					}
+					return m_arr.map(m => typeof m !== 'string' ? m : m
+							.split(/[,\r\n]/)
+						)
+						.flat();
+				}
+				else
+				{
+					return m;
+				}
+			}
+		})
+		.filter(m => !!m);
+
+	// turn strings into regular expressions
+	matches = matches
+		.map(m =>
+		{
+			if(typeof m !== 'string')
+			{
+				return m;
+			}
+			else
+			{
+				var m_arr = typeof customWildcardSplitFn === 'function' ? customWildcardSplitFn(m) : m.split('*');
+				
+				if(!Array.isArray(m_arr))
+				{
+					return m_arr;
+				}
+				else
+				{
+					// escape regex symbols
+					m_arr = m_arr.map(p => p.replace(/[/\-\\^$*+?.()|[\]{}]/g, '\\$&'));
+					
+					return typeof customWildcardJoinFn === 'function' ? customWildcardJoinFn(m_arr) : m_arr.join('(.*)');
+				}
+			}
+		})
+		.map(m =>
+		{
+			if(typeof m !== 'string')
+			{
+				return m;
+			}
+			else
+			{
+				if(typeof customRegExpFn === 'function')
+				{
+					return customRegExpFn(m);
+				}
+				else
+				{
+					return new RegExp('^' + m + '$', 'i');
+				}
+			}
+		});
+
+	// deserialize existing regular expressions
+	matches = matches
+		.map(m => typeof m === 'object' && m !== null && m.type === 'RegExp' ? new RegExp(m.pattern || '', m.flags || 'i') : m);
+
+	// remove any non-regex matches
+	matches = matches
+		.filter(m => typeof m.exec === 'function');
+
+	return matches;
+}
 
 function create_app(config, local_server_str)
 {
@@ -683,47 +805,25 @@ function create_app(config, local_server_str)
 		// sub app
 		// const p = connect();
 		
-		// grab host value for this vhost, ensure an array since multiple host matches are allowed in one vhost definition
-		var host_matches = v.host || '*';
-		if(!Array.isArray(host_matches))
-		{
-			host_matches = [host_matches];
-		}
+		var host_matches = parse_matches(
+			v.host || '*',
+			null,
+			m => // split
+			{
+				// a single '*' should match any domain:
+				m = m === '*' ? new RegExp('^.*$', 'i') : m;
+				
+				return typeof m !== 'string' ? m : m.split('*');
+			},
+			m => // join
+			{
+				// note: *.example.org does not match example.org or sub.any.example.org
+				return m.join('([^.]+)');
+			}
+		);
 		
-		// split, flatten, trim
-		host_matches = host_matches
-			.map(m => typeof m !== 'string' ? m : m
-				.split(/[,\r\n]/)
-			)
-			.flat()
-			.map(m => typeof m !== 'string' ? m : m
-				.trim()
-			);
-		
-		// at this point, create hostname by custom name, or based on the current host_matches (before it is turned into RegExp objects, and thus still human-readable format)
-		var hostname = v.name || host_matches.slice();
-		if(Array.isArray(hostname))
-		{
-			hostname = hostname.map(m => typeof m === 'string' ? m : JSON.stringify(m)).join(', ');
-		}
-
 		// store normalized hostname for later use
-		v._hostname = hostname;
-		
-		// turn strings into regular expressions (note: *.example.org does not match example.org or sub.any.example.org)
-		host_matches = host_matches
-			.map(m => typeof m !== 'string' ? m : (m === '*' ? new RegExp('^.*$', 'i') : m)) // except for a single '*', which matches any domain
-			.map(m => typeof m !== 'string' ? m : m
-				.split('*')
-				.map(p => p
-					.replace(/[/\-\\^$*+?.()|[\]{}]/g, '\\$&')
-				)
-				.join('([^.]+)')
-			).map(m => typeof m !== 'string' ? m : new RegExp('^' + m + '$', 'i'));
-		
-		// deserialize existing regular expressions
-		host_matches = host_matches
-			.map(m => typeof m === 'object' && m !== null && m.type === 'RegExp' ? new RegExp(m.pattern || '', m.flags || 'i') : m);
+		v._hostname = v.name || host_matches.map(m => ''+ m).join(', ');
 		
 		// store preprocessed matches for later use
 		v._host_matches = host_matches;
@@ -740,35 +840,11 @@ function create_app(config, local_server_str)
 			else if(v.proxy && ('trustProxy' in v.proxy)) trustProxy = v.trustProxy;
 			else if(config.proxy && ('trustProxy' in config.proxy)) trustProxy = config.trustProxy;
 			
-			var path_matches = subroute.path || '/';
-			if(!Array.isArray(path_matches))
-			{
-				path_matches = [path_matches];
-			}
-			
-			// split, flatten, trim
-			path_matches = path_matches
-				.map(m => typeof m !== 'string' ? m : m
-					.split(/[,\r\n]/)
-				)
-				.flat()
-				.map(m => typeof m !== 'string' ? m : m
-					.trim()
-				);
-			
-			// turn strings into regular expressions (note: /aoeu does not match /aoeux, since /aoeu implies /aoeu$ or /aoeu/*, in order to match any prefix, use the wildcard like so: /aoeu*)
-			path_matches = path_matches
-				.map(m => typeof m !== 'string' ? m : m
-					.split('*')
-					.map(p => p
-						.replace(/[/\-\\^$*+?.()|[\]{}]/g, '\\$&')
-					)
-					.join('(.*)')
-				).map(m => typeof m !== 'string' ? m : new RegExp('^' + m + (m.endsWith('/') ? '.*' : '(|/.*)') + '$', 'i'));
-			
-			// deserialize existing regular expressions
-			path_matches = path_matches
-				.map(m => typeof m === 'object' && m !== null && m.type === 'RegExp' ? new RegExp(m.pattern || '', m.flags || 'i') : m);
+			var path_matches = parse_matches(
+				subroute.path || '/',
+				// note: /aoeu does not match /aoeux, since /aoeu implies /aoeu$ or /aoeu/*, in order to match any prefix, use the wildcard like so: /aoeu*
+				m => new RegExp('^' + m + (m.endsWith('/') ? '.*' : '(|/.*)') + '$', 'i')
+			);
 			
 			// usage: {redirect: <address>}, {redirect: true, address: <address>}, {address: <address>}, {redirect: {code: 302}, address: <address>}
 			// usage: {proxy: {auth: ...}, address: <address>}
@@ -785,6 +861,13 @@ function create_app(config, local_server_str)
 				
 				// querystring is not supported: it is not easy to configure/understand how a custom querystring would be merged with an existing request's querystring
 			}
+			
+			// add support for allowing only certain local or remote IP-addresses
+			// important note: an empty whitelist is a special whitelist, which means that anyone is allowed
+			//                 which prevents the need for distinction of explicit declaration of this property in the configuration
+			//                 anyway, denying everyone is probably a bad configuration anyway, as the service could also simply be turned off
+			var localAddressWhitelist = parse_matches(subroute.localAddressWhitelist || [], null, null, null, str => str === 'localhost' ? '::ffff:127.0.0.1,127.0.0.1' : '');
+			var remoteAddressWhitelist = parse_matches(subroute.remoteAddressWhitelist || [], null, null, null, str => str === 'localhost' ? '::ffff:127.0.0.1,127.0.0.1' : '');
 			
 			// set subroute.proxy.socketPath if protocol is file
 			console.log('info: CONFIG ROUTE: ', subroute);
@@ -830,6 +913,12 @@ function create_app(config, local_server_str)
 					
 					// skip if request path does not match subroute path
 					if(!test_route(req, path_matches)) return next();
+
+					// skip if request socket localAddress does not match respective subroute whitelist
+					if(localAddressWhitelist.length > 0 && !test_address_whitelist(req, 'local', localAddressWhitelist)) return next();
+
+					// skip if request socket remoteAddress does not match respective subroute whitelist
+					if(remoteAddressWhitelist.length > 0 && !test_address_whitelist(req, 'remote', remoteAddressWhitelist)) return next();
 					
 					// apply redirect
 					res.writeHead(redirectCode, {
@@ -859,6 +948,12 @@ function create_app(config, local_server_str)
 					
 					// skip if request path does not match subroute path
 					if(!test_route(req, path_matches)) return next();
+					
+					// skip if request socket localAddress does not match respective subroute whitelist
+					if(localAddressWhitelist.length > 0 && !test_address_whitelist(req, 'local', localAddressWhitelist)) return next();
+
+					// skip if request socket remoteAddress does not match respective subroute whitelist
+					if(remoteAddressWhitelist.length > 0 && !test_address_whitelist(req, 'remote', remoteAddressWhitelist)) return next();
 					
 					// if not set yet, set Content-Length header to 0 if request method is DELETE or OPTIONS
 					if((req.method === 'DELETE' || req.method === 'OPTIONS') && !req.headers['content-length'])
@@ -991,6 +1086,12 @@ function create_app(config, local_server_str)
 					
 					// skip if request path does not match subroute path
 					if(!test_route(req, path_matches)) return next();
+					
+					// skip if request socket localAddress does not match respective subroute whitelist
+					if(localAddressWhitelist.length > 0 && !test_address_whitelist(req, 'local', localAddressWhitelist)) return next();
+
+					// skip if request socket remoteAddress does not match respective subroute whitelist
+					if(remoteAddressWhitelist.length > 0 && !test_address_whitelist(req, 'remote', remoteAddressWhitelist)) return next();
 					
 					var addr = socket.remoteAddress;
 					var port = socket.remotePort;
