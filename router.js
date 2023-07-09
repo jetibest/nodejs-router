@@ -481,7 +481,7 @@ function get_host(req, trustProxy)
 
 // integrated version based on the https://github.com/expressjs/vhost/(index.js) (npm vhost) module
 // including support for x-forwarded-for based on https://github.com/expressjs/express/(lib/request.js) (npm express) module
-function test_vhost(req, matches, trustProxy)
+function test_vhost(config, req, matches, trustProxy)
 {
 	// try to use the HTTP header value of X-Forwarded-For
 	const req_host = get_host(req, trustProxy);
@@ -489,7 +489,7 @@ function test_vhost(req, matches, trustProxy)
 	// assume false if host is not set and thus unknown
 	if(!req_host) return false;
 
-	console.error('debug: Trying to match host in request: ' + req_host + ' with matches: ', matches);
+	if(config.debug === true) console.error('debug: Trying to match host in request: ' + req_host + ' with matches: ', matches);
 	
 	// check if any of the matches can match the req_host
 	for(var i=0;i<matches.length;++i)
@@ -514,7 +514,7 @@ function test_vhost(req, matches, trustProxy)
 			
 			req.vhost = obj;
 
-			console.error('debug: vhost matched: ', req.vhost);
+			if(config.debug === true) console.error('debug: vhost matched: ', req.vhost);
 
 			return true;
 		}
@@ -523,9 +523,9 @@ function test_vhost(req, matches, trustProxy)
 	return false;
 }
 
-function test_route(req, matches)
+function test_route(config, req, matches)
 {
-	console.error('debug: Trying to match route path: ' + matches + ' with request: ' + req.url);
+	if(config.debug === true) console.error('debug: Trying to match route path: ' + matches + ' with request: ' + req.url);
 	
 	for(var i=0;i<matches.length;++i)
 	{
@@ -536,6 +536,8 @@ function test_route(req, matches)
 		
 		if(match)
 		{
+			if(config.debug === true) console.error('debug: route matched: ' + m);
+			
 			return true;
 		}
 	}
@@ -548,7 +550,7 @@ function test_address_whitelist(req, key, matches)
 {
 	var reqSocketAddress = req.socket[key + 'Address'];
 	
-	console.error('debug: Trying to match ' + key + 'Address in request: ' + reqSocketAddress);
+	if(config.debug === true) console.error('debug: Trying to match ' + key + 'Address in request: ' + reqSocketAddress);
 	
 	var found = false;
 	for(var i=0;i<matches.length;++i)
@@ -560,6 +562,8 @@ function test_address_whitelist(req, key, matches)
 		
 		if(match)
 		{
+			if(config.debug === true) console.error('debug: ' + key + 'Address matched: ' + m);
+			
 			return true;
 		}
 	}
@@ -644,8 +648,12 @@ function create_proxy_request(req, socket, targetURL, proxy)
 	// copy request method, unless specifically specified to override
 	if(typeof req_opts.method !== 'string') req_opts.method = req.method;
 	
-	// BUG: + req.url would always add a trailing slash to the pathname, what if the original did not have a trailing slash?
-	req_opts.path = targetURL.pathname + req.url;
+	// combine pathname (is never empty, is always at least '/') with the req.url which is stripped from its root path at the very least (strip if empty, is at least '/')
+	// careful, when prefix is stripped, then the target application cannot reproduce original URL's for the client from behind the proxy
+	// to allow for this, we send an additional header to the proxy, that provides the proxy app with the path that was stripped
+	req_opts.path = targetURL.pathname + (req.url.startsWith(targetURL.strip) ? req.url.substring(targetURL.strip.length) : req.url);
+
+	console.log(req_opts.path + ' from ' + targetURL.pathname + ' and ' + req.url + ' with strip: ' + targetURL.strip);
 	
 	// copy request headers, and possibly overwrite with proxy-options headers
 	const headers = Object.assign(Object.assign({}, req.headers), proxy.headers);
@@ -664,12 +672,9 @@ function create_proxy_request(req, socket, targetURL, proxy)
 	
 	req_opts.headers = headers;
 	
-	console.log('targetURL: ', targetURL);
-	console.log(req_opts);
-
 	return (targetIsTLS ? https : http).request(req_opts);
 }
-function apply_xfwd_headers(headers, trustProxy, proto, addr, port)
+function apply_xfwd_headers(headers, trustProxy, proto, addr, port, strip)
 {
 	// append x-forwarded headers, only if we trust the proxy, otherwise we overwrite
 	if(!trustProxy)
@@ -678,16 +683,19 @@ function apply_xfwd_headers(headers, trustProxy, proto, addr, port)
 		headers['x-forwarded-port'] = port +'';
 		headers['x-forwarded-proto'] = proto;
 		headers['x-forwarded-host'] = addr;
+		headers['x-forwarded-prefix'] = strip;
 	}
 	else
 	{
 		var addr_cur = headers['x-forwarded-for'];
 		var port_cur = headers['x-forwarded-port'];
 		var proto_cur = headers['x-forwarded-proto'];
+		var strip_cur = headers['x-forwarded-prefix'];
 		
 		headers['x-forwarded-for'] = addr_cur ? (addr_cur + ',' + addr) : addr;
 		headers['x-forwarded-port'] = port_cur ? (port_cur + ',' + port) : (port +'');
 		headers['x-forwarded-proto'] = proto_cur ? (proto_cur + ',' + proto) : proto;
+		headers['x-forwarded-prefix'] = strip_cur ? (strip_cur + ',' + strip) : strip;
 		
 		headers['x-forwarded-host'] = headers['x-forwarded-host'] || headers.host || '';
 	}
@@ -856,8 +864,8 @@ function create_app(config, local_server_str)
 				targetURL.hostname = targetURL.hostname || '';
 				targetURL.port = (':' + (targetURL.port || '')).replace(/^:$/, '');
 				// remove trailing '/' from pathname, since req.url will be added, which is always at least starting with '/'
-				targetURL.pathname = (targetURL.pathname || '/').replace(/[/]$/, ''); // = path without querystring
-				
+				targetURL.pathname = targetURL.pathname || '/'; // = path without querystring
+				targetURL.strip = subroute.strip || '/';
 				// querystring is not supported: it is not easy to configure/understand how a custom querystring would be merged with an existing request's querystring
 			}
 			
@@ -908,16 +916,16 @@ function create_app(config, local_server_str)
 				http_stack.push(function(req, res, next)
 				{
 					// skip if request host does not match vhost
-					if(!test_vhost(req, host_matches, trustProxy)) return next();
+					if(!test_vhost(config, req, host_matches, trustProxy)) return next();
 					
 					// skip if request path does not match subroute path
-					if(!test_route(req, path_matches)) return next();
+					if(!test_route(config, req, path_matches)) return next();
 
 					// skip if request socket localAddress does not match respective subroute whitelist
-					if(localAddressWhitelist.length > 0 && !test_address_whitelist(req, 'local', localAddressWhitelist)) return next();
+					if(localAddressWhitelist.length > 0 && !test_address_whitelist(config, req, 'local', localAddressWhitelist)) return next();
 
 					// skip if request socket remoteAddress does not match respective subroute whitelist
-					if(remoteAddressWhitelist.length > 0 && !test_address_whitelist(req, 'remote', remoteAddressWhitelist)) return next();
+					if(remoteAddressWhitelist.length > 0 && !test_address_whitelist(config, req, 'remote', remoteAddressWhitelist)) return next();
 					
 					// apply redirect
 					res.writeHead(redirectCode, {
@@ -943,16 +951,16 @@ function create_app(config, local_server_str)
 				http_stack.push(function(req, res, next)
 				{
 					// skip if request host does not match vhost
-					if(!test_vhost(req, host_matches, trustProxy)) return next();
+					if(!test_vhost(config, req, host_matches, trustProxy)) return next();
 					
 					// skip if request path does not match subroute path
-					if(!test_route(req, path_matches)) return next();
+					if(!test_route(config, req, path_matches)) return next();
 					
 					// skip if request socket localAddress does not match respective subroute whitelist
-					if(localAddressWhitelist.length > 0 && !test_address_whitelist(req, 'local', localAddressWhitelist)) return next();
+					if(localAddressWhitelist.length > 0 && !test_address_whitelist(config, req, 'local', localAddressWhitelist)) return next();
 
 					// skip if request socket remoteAddress does not match respective subroute whitelist
-					if(remoteAddressWhitelist.length > 0 && !test_address_whitelist(req, 'remote', remoteAddressWhitelist)) return next();
+					if(remoteAddressWhitelist.length > 0 && !test_address_whitelist(config, req, 'remote', remoteAddressWhitelist)) return next();
 					
 					// if not set yet, set Content-Length header to 0 if request method is DELETE or OPTIONS
 					if((req.method === 'DELETE' || req.method === 'OPTIONS') && !req.headers['content-length'])
@@ -973,7 +981,7 @@ function create_app(config, local_server_str)
 					var port = socket.remotePort;
 					var proto = req.isSpdy || socket.encrypted ? 'https' : 'http';
 					
-					apply_xfwd_headers(req.headers, trustProxy, proto, addr, port);
+					apply_xfwd_headers(req.headers, trustProxy, proto, addr, port, targetURL.strip);
 
 					// forward request
 					const proxyReq = create_proxy_request(req, socket, targetURL, proxy);
@@ -1081,22 +1089,22 @@ function create_app(config, local_server_str)
 					if(req.method !== 'GET' || !req.headers.upgrade || req.headers.upgrade.toLowerCase() !== 'websocket') return next();
 					
 					// skip if request host does not match vhost
-					if(!test_vhost(req, host_matches, trustProxy)) return next();
+					if(!test_vhost(config, req, host_matches, trustProxy)) return next();
 					
 					// skip if request path does not match subroute path
-					if(!test_route(req, path_matches)) return next();
+					if(!test_route(config, req, path_matches)) return next();
 					
 					// skip if request socket localAddress does not match respective subroute whitelist
-					if(localAddressWhitelist.length > 0 && !test_address_whitelist(req, 'local', localAddressWhitelist)) return next();
+					if(localAddressWhitelist.length > 0 && !test_address_whitelist(config, req, 'local', localAddressWhitelist)) return next();
 
 					// skip if request socket remoteAddress does not match respective subroute whitelist
-					if(remoteAddressWhitelist.length > 0 && !test_address_whitelist(req, 'remote', remoteAddressWhitelist)) return next();
+					if(remoteAddressWhitelist.length > 0 && !test_address_whitelist(config, req, 'remote', remoteAddressWhitelist)) return next();
 					
 					var addr = socket.remoteAddress;
 					var port = socket.remotePort;
 					var proto = socket.encrypted ? 'wss' : 'ws';
 					
-					apply_xfwd_headers(req.headers, trustProxy, proto, addr, port);
+					apply_xfwd_headers(req.headers, trustProxy, proto, addr, port, targetURL.strip);
 					
 					// prepare socket
 					socket.setTimeout(0);
@@ -1187,7 +1195,7 @@ function create_app(config, local_server_str)
 	};
 }
 
-async function create_sni_callback(server_opts, tls_conf, vhosts, has_acme_challenge)
+async function create_sni_callback(server_opts, tls_conf, vhosts, has_acme_challenge, config_debug)
 {
 	const cache = {};
 	async function get_cached_file(filename)
@@ -1221,7 +1229,7 @@ async function create_sni_callback(server_opts, tls_conf, vhosts, has_acme_chall
 			try
 			{
 				// mark for this function (and any other parallel requests!) we are working on it
-				console.error('debug: Reading configured files in async (' + JSON.stringify(host_tls) + ').');
+				if(config_debug === true) console.error('debug: Reading configured files in async (' + JSON.stringify(host_tls) + ').');
 				
 				const tls_opts = {
 					key: await get_cached_file(host_tls.key),
@@ -1239,7 +1247,7 @@ async function create_sni_callback(server_opts, tls_conf, vhosts, has_acme_chall
 					host_tls: host_tls,
 					error: err
 				});
-				console.error('debug: Error (' + (err ? err.code : 'undefined') + ') while reading configured files (' + JSON.stringify(host_tls) + ').');
+				if(config_debug === true) console.error('debug: Error (' + (err ? err.code : 'undefined') + ') while reading configured files (' + JSON.stringify(host_tls) + ').');
 			}
 		}
 		
@@ -1305,7 +1313,7 @@ async function create_sni_callback(server_opts, tls_conf, vhosts, has_acme_chall
 				// fallback to acme_challenge default path, even when acme_challenge is not enabled, it cannot hurt to check its location (maybe it is used/enabled externally)
 				host_tls_array.push(acme_challenge.getCertificate(domain));
 				
-				console.error('debug: Dynamically loading custom TLS/SSL for domain (' + domain + ') which matched: ' + JSON.stringify(v.host) + '.');
+				if(config_debug === true) console.error('debug: Dynamically loading custom TLS/SSL for domain (' + domain + ') which matched: ' + JSON.stringify(v.host) + '.');
 				
 				// grab the first TLS certificate that can be read
 				tls_lookup[domain] = tls_read_files(host_tls_array);
@@ -1318,13 +1326,13 @@ async function create_sni_callback(server_opts, tls_conf, vhosts, has_acme_chall
 				}
 				catch(err)
 				{
-					console.error('debug: Failed to load TLS Certificate/Key files for request domain (' + domain + '):');
-					console.error(err);
+					if(config_debug === true) console.error('debug: Failed to load TLS Certificate/Key files for request domain (' + domain + '):');
+					if(config_debug === true) console.error(err);
 					
 					// automatically create a certificate for this domain, since it does not exist, only if acme_challenge is enabled through Router
 					if(has_acme_challenge)
 					{
-						console.error('debug: Going to create a new missing certificate for request domain (' + domain + ').');
+						if(config_debug === true) console.error('debug: Going to create a new missing certificate for request domain (' + domain + ').');
 						try
 						{
 							await acme_challenge.createCertificate({
@@ -1333,7 +1341,7 @@ async function create_sni_callback(server_opts, tls_conf, vhosts, has_acme_chall
 								email: v.webmasterEmailAddress || false
 							});
 						
-							console.error('debug: Dynamically loading newly created certificate for domain (' + domain + ').');
+							if(config_debug === true) console.error('debug: Dynamically loading newly created certificate for domain (' + domain + ').');
 							
 							// try again, but only for the acme_challenge certificate
 							tls_lookup[domain] = tls_read_files([acme_challenge.getCertificate(domain)]);
@@ -1346,14 +1354,14 @@ async function create_sni_callback(server_opts, tls_conf, vhosts, has_acme_chall
 							}
 							catch(err_sub_sub)
 							{
-								console.error('debug: Failed to load newly created certificate file for request domain (' + domain + '):');
-								console.error(err_sub_sub);
+								if(config_debug === true) console.error('debug: Failed to load newly created certificate file for request domain (' + domain + '):');
+								if(config_debug === true) console.error(err_sub_sub);
 							}
 						}
 						catch(err_sub)
 						{
-							console.error('debug: Failed to create new certificate for request domain (' + domain + '):');
-							console.error(err_sub);
+							if(config_debug === true) console.error('debug: Failed to create new certificate for request domain (' + domain + '):');
+							if(config_debug === true) console.error(err_sub);
 						}
 					}
 				}
@@ -1363,7 +1371,7 @@ async function create_sni_callback(server_opts, tls_conf, vhosts, has_acme_chall
 		if(!secureContext)
 		{
 			// no key/cert available for this domain
-			console.error('debug: No TLS Certificate/Key files available for request domain (' + domain + '). Fallback to default global TLS/SSL files.');
+			if(config_debug === true) console.error('debug: No TLS Certificate/Key files available for request domain (' + domain + '). Fallback to default global TLS/SSL files.');
 			secureContext = false;
 		}
 		
@@ -1512,7 +1520,7 @@ async function create_sni_callback(server_opts, tls_conf, vhosts, has_acme_chall
 			const new_app = await create_app(new_config, local_server_str);
 
 			// setup TLS-server options, here router_opts.acme_challenge means that on the HTTP/:80 acme-challenge server is running and enabled
-			const new_sni_callback = router_opts.tls ? await create_sni_callback(server_opts, new_config.tls, new_config.vhosts, router_opts.acme_challenge) : null;
+			const new_sni_callback = router_opts.tls ? await create_sni_callback(server_opts, new_config.tls, new_config.vhosts, router_opts.acme_challenge, new_config.debug) : null;
 			
 			// loading complete, now apply...
 			
@@ -1548,7 +1556,10 @@ async function create_sni_callback(server_opts, tls_conf, vhosts, has_acme_chall
 		});
 		
 		// listening to clientError is not mandatory, but can be informative to see if clients had any failed requests
-		server.on('clientError', err => console.error('debug: Client error (' + (err ? err.code : 'undefined') + ').'));
+		server.on('clientError', err =>
+		{
+			if(config.debug === true) console.error('debug: Client error (' + (err ? err.code : 'undefined') + ').');
+		});
 		
 		server.on('listening', () => console.log('info: Server listening on ' + local_server_str));
 		server.on('close', () => console.log('info: Server stopped.'));
