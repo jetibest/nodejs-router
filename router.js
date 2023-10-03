@@ -11,7 +11,6 @@ const https = require('https');
 const tls = require('tls');
 const path = require('path');
 const util = require('util');
-const performance = require('perf_hooks').performance;
 const acme_challenge = require('./acme_challenge.js');
 
 const DEFAULT_CONFIG_PARSER = JSON;
@@ -857,7 +856,24 @@ function create_app(config, local_server_str)
 			// usage: {proxy: {auth: ...}, address: <address>}
 			// if only an address is given, proxy is implied
 			const targetAddr = subroute.address || subroute.redirect || subroute.proxy;
-			const targetURL = typeof targetAddr === 'string' ? new URL(targetAddr.indexOf('://') === -1 ? 'http://' + targetAddr : targetAddr) : targetAddr;
+			var targetURL = null;
+			if(typeof targetAddr === 'string')
+			{
+				if(targetAddr.indexOf('://') === targetAddr.length - 3 || targetAddr.endsWith(':') === targetAddr.length - 1)
+				{
+					targetURL = {
+						protocol: targetAddr
+					};
+				}
+				else
+				{
+					targetURL = new URL(targetAddr.indexOf('://') === -1 ? 'http://' + targetAddr : targetAddr);
+				}
+			}
+			else
+			{
+				targetURL = targetAddr;
+			}
 			if(targetURL)
 			{
 				targetURL.protocol = ((targetURL.protocol || '') + ':').replace(/:.*$/, '://').replace(/^:\/\/$/, '').replace(/^ws/i, 'http');
@@ -932,7 +948,7 @@ function create_app(config, local_server_str)
 						'Location': literalTargetLocation ||
 						            targetLocation
 						                .replace(/<(domain|domainname|host|hostname)>/gi, req.vhost.hostname)
-						                .replace(/<(url)>/gi, req.url || '')
+						                .replace(/([/]|)<(url)>/gi, ($0, $1) => (req.url || '')) // note: consume slash before <url> when possible, since req.url always starts with a slash
 					});
 					res.end(); // optional message that says a redirect is sent? or maybe even use HTML?
 				});
@@ -1431,11 +1447,19 @@ async function create_sni_callback(server_opts, tls_conf, vhosts, has_acme_chall
 		var renew_certificates_last_attempt = 0;
 		async function renew_certificates(manual_override)
 		{
-			if(!router_opts.acme_challenge) return; // certificates cannot be renewed, acme_challenge is not enabled
+			if(!router_opts.acme_challenge)
+			{
+				console.log('info: Not renewing certificates, acme_challenge option is disabled.');
+				return; // certificates cannot be renewed, acme_challenge is not enabled
+			}
 			
-			if(renew_certificates_last_attempt === -1) return; // already working on it
+			if(renew_certificates_last_attempt === -1)
+			{
+				console.log('info: Certificates are still being renewed, not going to renew at this time.');
+				return; // already working on it
+			}
 			
-			var t0 = performance.now();
+			var t0 = Date.now();
 			
 			// if manual override, don't check renew_interval_ms
 			if(!manual_override)
@@ -1451,7 +1475,7 @@ async function create_sni_callback(server_opts, tls_conf, vhosts, has_acme_chall
 					renew_delay_ms = Math.min(renew_interval_ms || renew_retry_ms, renew_retry_ms);
 				}
 				
-				if(isNaN(renew_delay_ms) || renew_delay_ms === 0) return; // no interval set, don't set timer to renew
+				if(isNaN(renew_delay_ms) || renew_delay_ms === 0) return console.log('info: No certificate renewal delay set, not automatically renewing. Use acmeChallenge.renewInterval to set a time in seconds to automatically renew certificates.'); // no interval set, don't set timer to renew
 				
 				if(renew_certificates_last_attempt + renew_delay_ms > t0)
 				{
@@ -1541,7 +1565,9 @@ async function create_sni_callback(server_opts, tls_conf, vhosts, has_acme_chall
 			{
 				// apply SNICallback
 				sni_callback = new_sni_callback;
-				
+			}
+			if(router_opts.acme_challenge)
+			{
 				// renew certificates automatically at set intervals (e.g. once per 24 hours), depending on the configuration
 				renew_certificates();
 			}
