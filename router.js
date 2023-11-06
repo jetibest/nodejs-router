@@ -1144,7 +1144,7 @@ function create_app(config, local_server_str)
 					{
 						if(!proxyRes.upgrade)
 						{
-							socket.write(create_http_header('HTTP/' + res.httpVersion + ' ' + res.statusCode + ' ' + res.statusMessage, res.headers));
+							socket.write(create_http_header('HTTP/' + proxyRes.httpVersion + ' ' + proxyRes.statusCode + ' ' + proxyRes.statusMessage, proxyRes.headers));
 							proxyRes.pipe(socket);
 						}
 					});
@@ -1155,9 +1155,9 @@ function create_app(config, local_server_str)
 						// proxySocket.on('end', function(){});
 						
 						// prepare socket
-						socket.setTimeout(0);
-						socket.setNoDelay(true);
-						socket.setKeepAlive(true, 0);
+						proxySocket.setTimeout(0);
+						proxySocket.setNoDelay(true);
+						proxySocket.setKeepAlive(true, 0);
 						
 						if(proxyHead && proxyHead.length) proxySocket.unshift(proxyHead);
 						
