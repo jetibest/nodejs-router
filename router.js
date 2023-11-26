@@ -868,7 +868,21 @@ function create_app(config, local_server_str)
 				}
 				else
 				{
-					targetURL = new URL(targetAddr.indexOf('://') === -1 ? 'http://' + targetAddr : targetAddr);
+					var parsedURL = new URL(targetAddr.indexOf('://') === -1 ? 'http://' + targetAddr : targetAddr);
+					targetURL = {};
+					// URL instance has special getter/setter functions, setting :80 as port, will make url.port = '' because of bad port value, we can also not add new properties to this URL instance
+					// so we make a new instance by copying the key/value map manually:
+					targetURL.href = parsedURL.href; // not needed
+					targetURL.origin = parsedURL.origin; // not needed
+					targetURL.protocol = parsedURL.protocol;
+					targetURL.username = parsedURL.username;
+					targetURL.password = parsedURL.password;
+					targetURL.host = parsedURL.host;
+					targetURL.hostname = parsedURL.hostname;
+					targetURL.port = parsedURL.port;
+					targetURL.pathname = parsedURL.pathname;
+					targetURL.search = parsedURL.search;
+					targetURL.hash = parsedURL.hash;
 				}
 			}
 			else
@@ -885,6 +899,7 @@ function create_app(config, local_server_str)
 				targetURL.strip = subroute.strip || '/';
 				// querystring is not supported: it is not easy to configure/understand how a custom querystring would be merged with an existing request's querystring
 			}
+			console.log('info: PARSED TARGET URL: ', targetURL);
 			
 			// add support for allowing only certain local or remote IP-addresses
 			// important note: an empty whitelist is a special whitelist, which means that anyone is allowed
