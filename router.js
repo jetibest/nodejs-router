@@ -958,7 +958,7 @@ function create_app(config, local_server_str)
 
 					// skip if request socket remoteAddress does not match respective subroute whitelist
 					if(remoteAddressWhitelist.length > 0 && !test_address_whitelist(config, req, 'remote', remoteAddressWhitelist)) return next();
-					
+
 					// apply redirect
 					res.writeHead(redirectCode, {
 						'Location': literalTargetLocation ||
@@ -1086,16 +1086,11 @@ function create_app(config, local_server_str)
 							
 							// implement cookieDomainRewrite, cookiePathRewrite, preserveHeaderKeyCase
 							
-							// copy headers from proxyRes to res
-							const proxyRawHeaders = proxyRes.rawHeaders;
-							for(var i=0;i<proxyRawHeaders.length;++i)
-							{
-								res.setHeader(proxyRawHeaders[i].trim(), proxyRawHeaders[++i]);
-							}
-							
-							// copy statusCode from proxyRes
-							res.statusCode = proxyRes.statusCode;
+							// note: don't manually copy headers with setHeader(), directly use the raw array, because setHeader also needs appendHeader in case of multiple values of the same key (i.e. multiple Set-Cookie header entries)
+
 							if(proxyRes.statusMessage) res.statusMessage = proxyRes.statusMessage;
+							
+							res.writeHead(proxyRes.statusCode, proxyRes.rawHeaders);
 						}
 						
 						if(!res.finished)
