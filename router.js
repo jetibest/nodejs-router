@@ -641,7 +641,8 @@ function create_proxy_request(req, socket, targetURL, proxy, config)
 	{
 		req_opts.hostname = targetURL.hostname || 'localhost';
 		req_opts.port = parseInt(((targetURL.port || '') +'').replace(/^:/, '')) || (targetIsTLS ? 443 : 80);
-		req_opts.family = socket.localFamily === 'IPv4' ? 4 : socket.localFamily === 'IPv6' ? 6 : 0;
+		// note: let the family depend on the hostname automatically, don't prefer one over the other, this is an HTTP proxy, not TCP, so family can change between proxy hops
+		// req_opts.family = socket.localFamily === 'IPv4' ? 4 : socket.localFamily === 'IPv6' ? 6 : 0;
 	}
 
 	// copy request method, unless specifically specified to override
