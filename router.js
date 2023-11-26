@@ -971,6 +971,50 @@ function create_app(config, local_server_str)
 					});
 					res.end(); // optional message that says a redirect is sent? or maybe even use HTML?
 				});
+
+				const redirectMessagesMap = {
+					'300': 'Multiple Choices',
+					'301': 'Moved Permanently',
+					'302': 'Found',
+					'303': 'See Other',
+					'304': 'Not Modified',
+					'305': 'Use Proxy',
+					'307': 'Temporary Redirect',
+					'308': 'Permanent Redirect'
+				};
+
+				// for instance, for websocket redirects (note: ws:// to wss:// or back won't work, scheme can typically not be changed, only the port, path, querystring, hostname, may be changed):
+				ws_stack.push((req, socket, head, next) =>
+				{
+					// check method and header
+					if(req.method !== 'GET' || !req.headers.upgrade || req.headers.upgrade.toLowerCase() !== 'websocket') return next();
+
+					// skip if request host does not match vhost
+					if(!test_vhost(config, req, host_matches, trustProxy)) return next();
+
+					// skip if request path does not match subroute path
+					if(!test_route(config, req, path_matches)) return next();
+
+					// skip if request socket localAddress does not match respective subroute whitelist
+					if(localAddressWhitelist.length > 0 && !test_address_whitelist(config, req, 'local', localAddressWhitelist)) return next();
+
+					// skip if request socket remoteAddress does not match respective subroute whitelist
+					if(remoteAddressWhitelist.length > 0 && !test_address_whitelist(config, req, 'remote', remoteAddressWhitelist)) return next();
+
+					var redirectMessage = redirectMessagesMap[redirectCode] || '';
+
+					// apply redirect (without res object)
+					socket.end(
+						'HTTP/1.1 ' + redirectCode + (redirectMessage ? ' ' + redirectMessage : '') + '\r\n' +
+						'Location: ' + (
+							literalTargetLocation ||
+							targetLocation
+						            .replace(/<(domain|domainname|host|hostname)>/gi, req.vhost.hostname)
+						            .replace(/([/]|)<(url)>/gi, ($0, $1) => (req.url || '')) // note: consume slash before <url> when possible, since req.url always starts with a slash
+						).replace(/^http(s|):[/][/]/gi, ($0, $1) => 'ws' + $1 + '://') + '\r\n' +
+						'\r\n'
+					);
+				});
 			}
 			// handle address (proxy by default)
 			else if(targetURL)
@@ -1121,19 +1165,19 @@ function create_app(config, local_server_str)
 				{
 					// check method and header
 					if(req.method !== 'GET' || !req.headers.upgrade || req.headers.upgrade.toLowerCase() !== 'websocket') return next();
-					
+
 					// skip if request host does not match vhost
 					if(!test_vhost(config, req, host_matches, trustProxy)) return next();
-					
+
 					// skip if request path does not match subroute path
 					if(!test_route(config, req, path_matches)) return next();
-					
+
 					// skip if request socket localAddress does not match respective subroute whitelist
 					if(localAddressWhitelist.length > 0 && !test_address_whitelist(config, req, 'local', localAddressWhitelist)) return next();
 
 					// skip if request socket remoteAddress does not match respective subroute whitelist
 					if(remoteAddressWhitelist.length > 0 && !test_address_whitelist(config, req, 'remote', remoteAddressWhitelist)) return next();
-					
+
 					var addr = socket.remoteAddress;
 					var port = socket.remotePort;
 					var proto = socket.encrypted ? 'wss' : 'ws';
@@ -1192,6 +1236,7 @@ function create_app(config, local_server_str)
 						});
 						proxySocket.pipe(socket).pipe(proxySocket);
 					});
+					
 					proxyReq.end();
 				});
 			}
