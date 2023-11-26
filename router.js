@@ -609,7 +609,7 @@ function create_http_header(line, headers)
 		).join('\r\n') + '\r\n\r\n';
 }
 
-function create_proxy_request(req, socket, targetURL, proxy)
+function create_proxy_request(req, socket, targetURL, proxy, config)
 {
 	// set protocol, and determine if using TLS, defaults to no
 	const protocol = targetURL.protocol || (socket.encrypted ? 'https:' : 'http:');
@@ -652,8 +652,6 @@ function create_proxy_request(req, socket, targetURL, proxy)
 	// to allow for this, we send an additional header to the proxy, that provides the proxy app with the path that was stripped
 	req_opts.path = targetURL.pathname + (req.url.startsWith(targetURL.strip) ? req.url.substring(targetURL.strip.length) : req.url);
 
-	console.log(req_opts.path + ' from ' + targetURL.pathname + ' and ' + req.url + ' with strip: ' + targetURL.strip);
-	
 	// copy request headers, and possibly overwrite with proxy-options headers
 	const headers = Object.assign(Object.assign({}, req.headers), proxy.headers);
 	
@@ -670,6 +668,10 @@ function create_proxy_request(req, socket, targetURL, proxy)
 	}
 	
 	req_opts.headers = headers;
+	// create a new Agent instance every request (avoids a problem when socket is re-used, and proxyReq.socket will not fire a 'response' event)
+	req_opts.agent = false;
+	
+	if(config.debug === true) console.log('create_proxy_request for: ' + req_opts.path + ' from ' + targetURL.pathname + ' and ' + req.url + ' with strip: ' + targetURL.strip);
 	
 	return (targetIsTLS ? https : http).request(req_opts);
 }
@@ -1016,23 +1018,17 @@ function create_app(config, local_server_str)
 					apply_xfwd_headers(req.headers, trustProxy, proto, addr, port, targetURL.strip);
 
 					// forward request
-					const proxyReq = create_proxy_request(req, socket, targetURL, proxy);
-					
+					const proxyReq = create_proxy_request(req, socket, targetURL, proxy, config);
+
 					// this is the timeout of the proxy request
 					if(proxy.timeout)
 					{
 						// outgoing timeout
 						proxyReq.setTimeout(proxy.timeout, function()
 						{
-							proxyReq.abort();
+							proxyReq.destroy();
 						});
 					}
-					
-					// if request was aborted, then abort proxyRequest as well
-					req.on('aborted', function()
-					{
-						proxyReq.abort();
-					});
 					
 					function onProxyError(err, context)
 					{
@@ -1040,7 +1036,7 @@ function create_app(config, local_server_str)
 						
 						if(req.socket.destroyed && err.code === 'ECONNRESET')
 						{
-							proxyReq.abort();
+							proxyReq.destroy();
 						}
 						
 						if(!res.headersSent)
@@ -1053,6 +1049,10 @@ function create_app(config, local_server_str)
 						// proxy connection may have been interrupted, since headers were sent already
 						// don't just end, but destroy, to let the other party know something went wrong
 						res.socket.destroySoon();
+						
+						// ensure req/proxyReq are destroyed if any error occurs
+						if(!req.destroyed && !req.writableEnded) req.destroy();
+						if(!proxyReq.destroyed && !proxyReq.writableEnded) proxyReq.destroy();
 					}
 					
 					req.on('error', err => onProxyError(err, 'request'));
@@ -1061,10 +1061,12 @@ function create_app(config, local_server_str)
 					// pipe request to proxy
 					req.pipe(proxyReq);
 					
+					// note: if proxyReq.socket is not destroyed (or agent is not set to false, http.request({agent: false}), then the socket is re-used, but then while on('socket') will be fired, on('response') not, and the request will hang)
+
 					// wait for response
 					proxyReq.on('response', function(proxyRes)
 					{
-						if(!res.headersSent)
+						if(!res.headersSent && !res.writableEnded)
 						{
 							// if HTTP 1.0 request, remove chunk headers
 							if(req.httpVersion === '1.0')
@@ -1099,12 +1101,16 @@ function create_app(config, local_server_str)
 							{
 								// log that proxy response was finished (we could keep an accurate count of current proxy requests, and request it with SIGUSR1)
 							});
-							
+						}
+						
+						if(!res.finished && !res.writableEnded)
+						{
 							proxyRes.pipe(res);
 						}
 						else
 						{
-							// log that proxy response was finished
+							console.log('proxy.onResponse: res already ended, destroying proxyRes for ' + req.url);
+							proxyRes.destroy(); // destroy and consume data
 						}
 					});
 				});
@@ -1140,7 +1146,7 @@ function create_app(config, local_server_str)
 					
 					if(head && head.length) socket.unshift(head);
 					
-					const proxyReq = create_proxy_request(req, socket, targetURL, proxy);
+					const proxyReq = create_proxy_request(req, socket, targetURL, proxy, config);
 					
 					// emit proxyReqWs ...
 					
