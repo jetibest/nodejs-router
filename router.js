@@ -908,7 +908,7 @@ function create_app(config, local_server_str)
 			// important note: an empty whitelist is a special whitelist, which means that anyone is allowed
 			//                 which prevents the need for distinction of explicit declaration of this property in the configuration
 			//                 anyway, denying everyone is probably a bad configuration anyway, as the service could also simply be turned off
-			var localAddressWhitelist = parse_matches(subroute.localAddressWhitelist || v.localAddressWhitelist || config.localAddressWhitelist || [], null, null, null, str => str === 'localhost' ? '::ffff:127.0.0.1,127.0.0.1' : str);
+			var localAddressWhitelist = parse_matches(subroute.localAddressWhitelist || v.localAddressWhitelist || config.localAddressWhitelist || [], null, null, null, str => str === 'localhost' ? '::1,::ffff:127.0.0.1,127.0.0.1' : str);
 			var remoteAddressWhitelist = parse_matches(subroute.remoteAddressWhitelist || v.remoteAddressWhitelist || config.remoteAddressWhitelist || [], null, null, null, str => str === 'localhost' ? '::ffff:127.0.0.1,127.0.0.1' : str);
 			
 			// set subroute.proxy.socketPath if protocol is file
