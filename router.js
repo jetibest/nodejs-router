@@ -11,6 +11,7 @@ const https = require('https');
 const tls = require('tls');
 const path = require('path');
 const util = require('util');
+const url = require('url');
 const acme_challenge = require('./acme_challenge.js');
 
 const DEFAULT_CONFIG_PARSER = JSON;
@@ -1129,6 +1130,40 @@ function create_app(config, local_server_str)
 								proxyRes.headers.connection = req.headers.connection || 'keep-alive';
 							}
 							
+							var rawHeaders = proxyRes.rawHeaders.slice();
+							for(var i=0;i<rawHeaders.length;i+=2)
+							{
+								var key = rawHeaders[i];
+								if(key.toLowerCase() === 'location' && proxy.changeOrigin)
+								{
+									// if location refers to a hostname that is equal to our hostname
+									// and changeOrigin is true, then override this
+									var redirectTarget = url.parse((rawHeaders[i+1].indexOf('://') !== -1 ? '' : 'http://') + rawHeaders[i+1]);
+									// console.log(req.headers);
+
+									// only if hostname is the hostname of the proxy target
+									if(redirectTarget.hostname === targetURL.hostname)
+									{
+										// if trustProxy, then use X-Forwarded-Host
+										var originalHost = req.headers.host;
+
+										if(trustProxy && req.headers['x-forwarded-host'])
+										{
+											originalHost = req.headers['x-forwarded-host'];
+										}
+
+										// update the hostname to the domain we represent
+										var reqHost = url.parse((originalHost.indexOf('://') !== -1 ? '' : 'http://') + originalHost);
+										redirectTarget.hostname = reqHost.hostname;
+										redirectTarget.host = reqHost.host;
+										redirectTarget.port = reqHost.port;
+										if(config.debug === true) console.log('debug: Rewriting ' + rawHeaders[i+1] + ' to ' + url.format(redirectTarget));
+									}
+
+									rawHeaders[i+1] = url.format(redirectTarget);
+								}
+							}
+
 							// optionally rewrite host here, implement hostRewrite, autoRewrite, protocolRewrite
 							
 							// implement cookieDomainRewrite, cookiePathRewrite, preserveHeaderKeyCase
@@ -1137,7 +1172,7 @@ function create_app(config, local_server_str)
 
 							if(proxyRes.statusMessage) res.statusMessage = proxyRes.statusMessage;
 							
-							res.writeHead(proxyRes.statusCode, proxyRes.rawHeaders);
+							res.writeHead(proxyRes.statusCode, rawHeaders);
 						}
 						
 						if(!res.finished)
