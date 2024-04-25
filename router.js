@@ -911,6 +911,11 @@ function create_app(config, local_server_str)
 			//                 anyway, denying everyone is probably a bad configuration anyway, as the service could also simply be turned off
 			var localAddressWhitelist = parse_matches(subroute.localAddressWhitelist || v.localAddressWhitelist || config.localAddressWhitelist || [], null, null, null, str => str === 'localhost' ? '::1,::ffff:127.0.0.1,127.0.0.1' : str);
 			var remoteAddressWhitelist = parse_matches(subroute.remoteAddressWhitelist || v.remoteAddressWhitelist || config.remoteAddressWhitelist || [], null, null, null, str => str === 'localhost' ? '::ffff:127.0.0.1,127.0.0.1' : str);
+
+			// add support for Authorization: Basic <base64credentials> header
+			// the Authorization header must match the configured value, if specified
+			// the value must have been set to the entire header value, including the "Basic" or "Bearer" part!
+			var basicAuth = subroute.authorization || v.authorization || config.authorization || '';
 			
 			// set subroute.proxy.socketPath if protocol is file
 			console.log('info: CONFIG ROUTE: ', subroute);
@@ -963,6 +968,25 @@ function create_app(config, local_server_str)
 					// skip if request socket remoteAddress does not match respective subroute whitelist
 					if(remoteAddressWhitelist.length > 0 && !test_address_whitelist(config, req, 'remote', remoteAddressWhitelist)) return next();
 
+					// send 403 Forbidden if request Authorization header does not match
+					if(basicAuth.length > 0 && req.headers.authorization !== basicAuth)
+					{
+						if(!req.headers.authorization)
+						{
+							// Unauthorized
+							res.writeHead(401, {'WWW-Authenticate': 'Basic realm="localhost"'});
+							res.end();
+							return;
+						}
+						else
+						{
+							// Forbidden
+							res.writeHead(403);
+							res.end();
+							return;
+						}
+					}
+
 					// apply redirect
 					res.writeHead(redirectCode, {
 						'Location': literalTargetLocation ||
@@ -1001,6 +1025,28 @@ function create_app(config, local_server_str)
 
 					// skip if request socket remoteAddress does not match respective subroute whitelist
 					if(remoteAddressWhitelist.length > 0 && !test_address_whitelist(config, req, 'remote', remoteAddressWhitelist)) return next();
+
+					// skip if request Authorization header does not match
+					if(basicAuth.length > 0 && req.headers.authorization !== basicAuth)
+					{
+						if(!req.headers.authorization)
+						{
+							socket.end(
+								'HTTP/1.1 401 Unauthorized\r\n' +
+								'WWW-Authenticate: Basic realm="localhost"\r\n' +
+								'\r\n'
+							);
+							return;
+						}
+						else
+						{
+							socket.end(
+								'HTTP/1.1 403 Forbidden\r\n' +
+								'\r\n'
+							);
+							return;
+						}
+					}
 
 					var redirectMessage = redirectMessagesMap[redirectCode] || '';
 
@@ -1041,6 +1087,31 @@ function create_app(config, local_server_str)
 
 					// skip if request socket remoteAddress does not match respective subroute whitelist
 					if(remoteAddressWhitelist.length > 0 && !test_address_whitelist(config, req, 'remote', remoteAddressWhitelist)) return next();
+
+					// send 403 Forbidden if request Authorization header does not match
+					if(basicAuth.length > 0 && req.headers.authorization !== basicAuth)
+					{
+						if(config.debug === true)
+						{
+							console.log('Request header authorization: ' + req.headers.authorization + ' does not match ' + basicAuth);
+							console.log(req.method + ' => ' + req.url + ' with headers:');
+							console.log(JSON.stringify(req.headers));
+						}
+						if(!req.headers.authorization)
+						{
+							// Unauthorized
+							res.writeHead(401, {'WWW-Authenticate': 'Basic realm="localhost"'});
+							res.end();
+							return;
+						}
+						else
+						{
+							// Forbidden
+							res.writeHead(403);
+							res.end();
+							return;
+						}
+					}
 					
 					// if not set yet, set Content-Length header to 0 if request method is DELETE or OPTIONS
 					if((req.method === 'DELETE' || req.method === 'OPTIONS') && !req.headers['content-length'])
@@ -1212,6 +1283,27 @@ function create_app(config, local_server_str)
 
 					// skip if request socket remoteAddress does not match respective subroute whitelist
 					if(remoteAddressWhitelist.length > 0 && !test_address_whitelist(config, req, 'remote', remoteAddressWhitelist)) return next();
+
+					// send 403 Forbidden if request Authorization header does not match
+					if(basicAuth.length > 0 && req.headers.authorization !== basicAuth)
+					{
+						if(!req.headers.authorization)
+						{
+							socket.end(
+								'HTTP/1.1 401 Unauthorized\r\n' +
+								'WWW-Authenticate: Basic realm="localhost"\r\n' +
+								'\r\n'
+							);
+						}
+						else
+						{
+							socket.end(
+								'HTTP/1.1 403 Forbidden\r\n' +
+								'\r\n'
+							);
+						}
+						return;
+					}
 
 					var addr = socket.remoteAddress;
 					var port = socket.remotePort;
